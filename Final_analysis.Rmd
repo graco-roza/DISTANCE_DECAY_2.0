@@ -1,0 +1,2066 @@
+---
+title: "Results of Abundance-based total similarities"
+author: "Caio Graco-Roza"
+params:
+  based: abund # occ= occurence | abund = abundance
+  component: Total similarities # Total similarities |  Replacement | Richness differences
+  subtitle: Using occurrence-based richness differences
+output:
+ html_document: default
+editor_options: 
+  chunk_output_type: inline
+---
+
+This file contains the code used to analyse the data from the Distance decay 2.0 - a global synthesis of taxonomic and functional turnover of ecological communities.
+The code is provided as it goes. The authors do not take responsibility for any analysis made based on this code besides the results included in the original manuscript, neither provide any guidance on the usage of it.
+
+```{r setup, include=TRUE, echo=FALSE, message=FALSE, warning = FALSE}
+
+#dependencies
+
+library(dismo)
+library(tidyverse)
+library(patchwork)
+library(magrittr)
+library(qwraps2)
+library(scales)
+library(Rmisc)
+library(ggrepel) 
+library(knitr)
+library(kableExtra)
+library(Cairo)
+library(ggtext)
+library(treezy)
+
+knitr::opts_knit$set(root.dir = dirname(rstudioapi::getActiveDocumentContext()$path)) #Set the working directory as the folder where this file is located
+knitr::opts_chunk$set(
+	fig.align = "center",
+	message = FALSE,
+	warning = FALSE,
+	dev = "png",
+	dpi = 50,
+	include = FALSE
+)
+```
+
+# Load functions 
+```{r loading functions , include=TRUE}
+source('scripts/Functions/Theme_agile.R') #ggplot theme for graphics
+source('scripts/Functions/auxiliary_functions.R') # loading functions to make graphics and BRT
+```
+
+# Manipulate data 
+
+```{r Plot parameters, include=TRUE}
+ 
+results<-  readxl::read_xlsx('input_between/input_between.xlsx') %>% 
+  mutate(Organism=recode(Organism, 
+                                   TP = "Terrestrial vascular plants",
+                                   AT = "Arthropods",
+                                   MI = "Macroinvertebrates",
+                                   BD = "Benthic diatoms",
+                                   PP = "Phytoplankton",
+                                   FI = "Fish",
+                                   BI = "Birds",
+                                   AP = "Aquatic plants",
+                                   BT = "Bats",
+                                   CO = "Corals",
+                                   FR = "Foraminifera",
+                                   LC = "Lichens",
+                                   BF = "Butterflies",
+                                   BP = "Bryophytes",
+                                   FG = "Fungi",
+                                   AB = "Amphibians",
+                                   CI = "Ciliates"
+                                   )) %>%  #rename biotic groups
+  mutate_at("Organism", factor, levels= c("Terrestrial vascular plants","Arthropods", "Macroinvertebrates",
+                                              "Benthic diatoms","Phytoplankton",
+                                              "Fish", "Birds","Aquatic plants",
+                                              "Bats", "Corals", "Foraminifera", 
+                                              "Lichens", "Butterflies", "Bryophytes",
+                                              "Fungi", "Amphibians", "Ciliates" )) %>%  #reorder biotic groups
+  mutate(Mantel_spa = case_when(spa_signif > 0.05 ~ 0, TRUE ~ Mantel_spa),
+         Mantel_env = case_when(env_signif > 0.05 ~ 0, TRUE ~ Mantel_env)) #Non - significant Mantel r were bounded to zero.
+
+Tax<- results %>% filter( Based == params$based,
+                          Beta_type == params$component,
+                          Level == "TAX") # dataframe with only taxonomic results
+
+Func <- results %>% filter(Based == params$based & 
+                          Beta_type == params$component &
+                          Level == "FUN") # dataframe with only functional results
+```
+
+
+#Figure 2
+
+```{r Figure 2, eval=FALSE}
+# Map =================================================================================================================
+
+coordinates_map <- read.csv("input_between/coordinates_compiled.csv")
+WorldData <- map_data('world')
+map_sites<-ggplot() +
+  geom_polygon(data = WorldData, aes(x = long, y = lat, group = group), fill="gray50") +
+  geom_point(data = coordinates_map, aes(x = Lon, y = Lat,fill=Realms),shape=21,size=2) +
+  labs(title = 'Global distribution of the sampling sites',
+       subtitle = "148 datasets totaling 17,310 sites") +
+  theme_grey()+
+  theme(text = element_text(family = "sans", color = "black"),
+        panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"),
+        panel.grid = element_blank(),
+        plot.title = element_text(size = 28, hjust=0),
+        plot.subtitle = element_text(size = 20, hjust=0),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = c(0.05,0.2),
+        legend.background = element_rect(fill="white"),
+        legend.box.background = element_rect(color="black", linetype=3,size=.5),
+        legend.key = element_rect(fill = "white"),
+        legend.text = element_text(size=12)
+  ) +
+  scale_fill_manual(values=c(cbPalette[c(7,5,4)]))+
+  guides(color = guide_legend(override.aes = list(size=5,shape=16)))
+ 
+
+# Organism =============================================================================================================
+df <- data.frame(Organism = names(table(Tax$Organism)),
+                 Counts = as.numeric(table(Tax$Organism)))
+
+df$Organism <- factor(df$Organism, levels = unique(Tax$Organism))
+n_data <- df %>% ggplot(aes(x = reorder(Organism, Counts), y = Counts)) +
+  geom_bar(stat = 'identity',
+           colour = 'black',
+           fill = "black") +
+  coord_flip() +
+  xlab('') + ylab('Number of datasets') +
+  geom_text(
+    data = df,
+    nudge_y = 3,
+    size = 5,
+    family = "sans",
+    fontface = 1,
+    aes(
+      x = reorder(Organism, Counts),
+      y = Counts,
+      label = Counts
+    )
+  ) +
+  theme_agile(
+    plot_grid = FALSE,
+    base_size = 12,
+    base_family = 'sans',
+    grid_cols = 'gray90'
+  ) +
+  theme(
+    legend.position = 'none',
+    axis.line.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) +
+  theme(plot.margin = margin(0, 0, 0, 0, "cm"))
+
+# Spatial extent =======================================================================================================
+
+n_ext <- ggplot(Tax, aes(spa_max)) +
+  geom_histogram(binwidth = 0.2, fill = '#000000') +
+  scale_x_continuous(
+    trans = log10_trans(),
+    breaks = trans_breaks("log10", function(x)
+      10 ^ x),
+    labels = trans_format("log10", math_format(10 ^ .x))
+  ) +
+  theme_agile(plot_grid = FALSE,
+              base_size = 12,
+              base_family = 'sans') +
+  theme(legend.position = 'none', axis.text.y = element_text(size = 12)) +
+  xlab('Spatial extent\n(kilometers)') +
+  ylab('Number of datasets')
+
+
+
+
+
+
+#number of sites =======================================================================================================
+
+n_su <- ggplot(Tax, aes(n_sites)) +
+  geom_histogram(binwidth = 0.1, fill = '#000000') +
+  scale_x_log10() +
+  theme_agile(plot_grid = FALSE,
+              base_size = 12,
+              base_family = 'sans') +
+  theme(legend.position = 'none', axis.text.y = element_text(size = 12)) +
+  xlab('Number of sites') +
+  ylab('')
+
+#number of traits ======================================================================================================
+
+
+n_tr <- ggplot(Tax, aes(log(gamma_trait))) +
+  geom_histogram(binwidth = 1, fill = '#000000') +
+  theme_agile(plot_grid = FALSE,
+              base_size = 12,
+              base_family = 'sans') +
+  theme(legend.position = 'none', axis.text.y = element_text(size = 12)) +
+  xlab(expression(paste(
+    "Functional ", gamma, '-diversity ', '(', Log, ")"
+  ))) +
+  ylab('Number of datasets')
+
+#number of species =====================================================================================================
+
+
+n_sp <- ggplot(Tax, aes(gamma_spe)) +
+  geom_histogram(binwidth = 0.1, fill = '#000000') +
+  scale_x_log10() +
+  theme_agile(plot_grid = FALSE,
+              base_size = 12,
+              base_family = 'sans') +
+  theme(legend.position = 'none', axis.text.y = element_text(size = 12)) +
+  xlab('Number of species') +
+  ylab('')
+
+#number of environmental variables =====================================================================================
+n_env <- ggplot(Tax, aes(n_var)) +
+  geom_histogram(binwidth = 0.1, fill = '#000000') +
+  scale_x_log10() +
+  theme_agile(plot_grid = FALSE,
+              base_size = 12,
+              base_family = 'sans') +
+  theme(legend.position = 'none', axis.text.y = element_text(size = 12)) +
+  xlab('Number of\nenvironmental variables') +
+  ylab('Number of datasets')
+
+
+#Latitudinal distribution ==============================================================================================
+
+n_lat <- ggplot(Tax, aes(Latitude)) +
+  geom_histogram(binwidth = 4, fill = '#000000') +
+  # scale_x_log10  scale_x_continuous(breaks = seq(0, 90, 15)) +
+  theme_agile(plot_grid = FALSE,
+              base_size = 12,
+              base_family = 'sans') +
+  theme(legend.position = 'none', axis.text.y = element_text(size = 12)) +
+  xlab('Mean absolute latitude\n(degrees)') +
+  ylab('')
+
+```
+
+#Assemble figures
+
+```{r Figure 2, fig.height=7.5, fig.width=6, eval=FALSE}
+
+fig_2_a <-  map_sites
+fig_2_b <- patchworkGrob({n_data} |{(n_ext | n_su) / (n_tr | n_sp) / (n_ext | n_lat)})
+design<-c(area(t=1,l=1,b=2,r=2),
+          area(t=3,l=1,b=5,r=2))
+Figure_2<- fig_2_a / fig_2_b  +plot_layout(design=design) 
+ 
+ggsave(Figure_2, file='Figures/Figure_2.pdf', device=cairo_pdf, width=13, height=14, unit="in")
+```
+
+
+# Master hypothesis
+
+This code was used to test the hypothesis 1a and 1b
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, include=TRUE}
+#Analysis to figure_4 
+
+ # T-test -----------------------------------------------------------------------------------------
+t1<-t.test(round(Tax$Mantel_spa,2),round(Func$Mantel_spa,2), paired=TRUE, conf.level=.95)
+
+t1 # taxonomic vs. functional (spatial distances)
+
+t2<-t.test(as.numeric(Tax$Mantel_env),as.numeric(Func$Mantel_spa), paired=TRUE, conf.level=.95)
+
+length(Tax$Dataset[which(round(Tax$Mantel_spa,2) - round(Func$Mantel_spa,2) <= 0)]) #Number of datasets higher in func than in tax
+
+t2 # taxonomic vs. functional (environmental distances)
+
+length(Tax$Dataset[which(round(Tax$Mantel_env,2) - round(Func$Mantel_env,2) <= 0)]) #Number of datasets higher in func than in tax
+
+
+ if (params$based == "occ") {
+  
+  path <- "output_within/Null models/Occurrence"
+  } else { 
+  path<- "output_within/Null models/Abundance"
+  }
+
+datasets<-list.files(path)
+
+#Number of significative slopes based on null models (space)
+null_res <- bind_rows(lapply(datasets, function(x) read.csv(paste0(path,"/",x)))) %>%
+  mutate_at("X",factor) %>% 
+  mutate_at("X", fct_recode, "Total similarities" = "1", "Replacement" = "2", "Richness differences" = "3") %>% 
+  dplyr::rename("Beta_type" = X, "Dataset" = dataset) %>% 
+  left_join(Tax, by=c("Dataset","Beta_type")) %>% 
+  filter(Beta_type == "Total similarities")
+
+
+#Number of significative slopes based on null models (environment)
+null_env <- bind_rows(lapply(datasets, function(x) read.csv(paste0(path,"/",x)))) %>%
+  mutate_at("X",factor) %>% 
+  mutate_at("X", fct_recode, "Total similarities" = "1", "Replacement" = "2", "Richness differences" = "3") %>% 
+  filter(X == "Total similarities")
+
+plot(null_spa$SES_spa, null_env$SES_env)
+```
+
+# Appendix S5 (Analysis)
+
+```{r}
+library(flextable)
+
+r_diff_spa<- Tax$Mantel_spa - Func$Mantel_spa #difference in Mantel R (space)
+
+#Run GLM
+binmod_spa <-
+  glm(
+    ifelse(r_diff_spa > 0, 1, 0) ~ Latitude + log(spa_max) + Realm + Body_size + Dispersal_mode + log(gamma_spe) + log(n_sites) + log(gamma_trait),
+    data = Tax %>%  dplyr::mutate(across(Realm, factor, levels=c("Terrestrial", "Marine", "Freshwaters"))),
+    family = binomial("logit")
+  ) 
+
+#Make table
+as_flextable(binmod_spa) %>% 
+  bold(bold = TRUE, part = "header") %>% 
+flextable::save_as_docx(path="table_binomial_spa.docx")
+
+#Model R²
+rcompanion::nagelkerke(binmod_spa)
+
+r_diff_env<- Tax$Mantel_env - Func$Mantel_env #difference Mantel r (environment)
+
+#run GLM
+binmod_env <-
+  glm(
+    ifelse(r_diff_env > 0, 1, 0) ~ Latitude + log(spa_max) + Realm + Body_size + Dispersal_mode + log(gamma_spe) + log(n_var) + log(gamma_trait),
+    data = Tax %>%  dplyr::mutate(across(Realm, factor, levels=c("Terrestrial", "Marine", "Freshwaters"))),
+    family = binomial("logit")
+  )
+
+#Make table
+as_flextable(binmod_env) %>% 
+  bold(bold = TRUE, part = "header") %>% 
+flextable::save_as_docx(path="table_binomial_env.docx")
+
+#Model R²
+rcompanion::nagelkerke(binmod_env)
+
+```
+
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, include=TRUE}
+
+#Mean values of slopes with sd.
+mean_spa_slope_tax<-paste0("Mean = ",round(mean(Tax$Slope_spa, na.rm=TRUE),3),"(sd ± ",round(sd(Tax$Slope_spa, na.rm=TRUE),3),")")
+mean_spa_slope_func<-paste0("Mean = ",round(mean(Func$Slope_spa, na.rm=TRUE),3),"(sd ± ",round(sd(Func$Slope_spa, na.rm=TRUE),3),")")
+mean_env_slope_tax<-paste0("Mean = ",round(mean(Tax$Slope_env,na.rm=TRUE),3),"(sd ± ",round(sd(Tax$Slope_env,na.rm=TRUE),3),")")
+mean_env_slope_func<-paste0("Mean = ",round(mean(Func$Slope_env, na.rm=TRUE),3),"(sd ± ",round(sd(Func$Slope_env, na.rm=TRUE),3),")")
+
+#Mean values of mantel r with sd.
+mean_spa_mantel_tax<-paste0("Mean = ",round(mean(Tax$Mantel_spa, na.rm=TRUE),3),"(sd ± ",round(sd(Tax$Mantel_spa, na.rm=TRUE),3),")")
+mean_spa_mantel_func<-paste0("Mean = ",round(mean(Func$Mantel_spa, na.rm=TRUE),3),"(sd ± ",round(sd(Func$Mantel_spa, na.rm=TRUE),3),")")
+mean_env_mantel_tax<-paste0("Mean = ",round(mean(Tax$Mantel_env,na.rm=TRUE),3),"(sd ± ",round(sd(Tax$Mantel_env,na.rm=TRUE),3),")")
+mean_env_mantel_func<-paste0("Mean = ",round(mean(Func$Mantel_env, na.rm=TRUE),3),"(sd ± ",round(sd(Func$Mantel_env, na.rm=TRUE),3),")")
+
+
+#Plot parameters ==================================================================================================
+theme_set(theme_agile(plot_grid = FALSE,base_family = "sans"))
+theme_update(
+legend.position = 'none',
+plot.title = element_text(size = 11, face = 'bold'),
+plot.subtitle = element_text(size = 11),
+axis.text.x = element_text(size = 11),
+axis.title.x = element_text(size = 11),
+axis.text.y = element_text(size = 11),
+axis.title.y = element_markdown(size=11),
+panel.grid.major = element_blank(),
+panel.grid.minor = element_blank(),
+panel.background = element_blank())
+
+
+# Taxonomic spatial distance decay ---------------------------------------------------------
+long_spa_tax <- list()
+for (kk in 1:nrow(Tax)) {
+  sh_range <- seq(0, Tax$spa_max[kk], 1)
+  long_spa_tax[[kk]] <- data.frame(
+    x = sh_range,
+    y = sapply(sh_range, function(x)
+      (1 - exp(
+        Tax$Intercept_spa[kk]
+      )) * exp(-Tax$Slope_spa[kk] * x)),
+    Code = rep(Tax$Dataset[kk], length(sh_range))
+  )
+}
+
+panel_1 <-
+  bind_rows(long_spa_tax) %>% ggplot(aes(x = x, y = y, group = Code)) +
+  geom_line(
+    alpha = 0.5,
+    size = 1,
+    linetype = 1,
+    colour = cbPalette[6]
+  ) +
+  ylim(0, 1) + xlab('Geographic distances (km)') + ylab('Community similarity') +
+  ggtitle('Taxonomic similarities', subtitle = mean_spa_slope_tax)
+
+#Functional Spatial distance decay ---------------------------------------------------------------
+
+long_spa_fun <- list()
+for (kk in 1:nrow(Func)) {
+  sh_range <- seq(0, Func$spa_max[kk], 1)
+  long_spa_fun[[kk]] <- data.frame(
+    x = sh_range,
+    y = sapply(sh_range, function(x)
+      (1 - exp(
+        Func$Intercept_spa[kk]
+      )) * exp(-Func$Slope_spa[kk] * x)),
+    Code = rep(Func$Dataset[kk], length(sh_range))
+  )
+}
+
+panel_2 <-
+  bind_rows(long_spa_fun) %>% ggplot(aes(x = x, y = y, group = Code)) +
+  geom_line(
+    alpha = 0.5,
+    size = 1,
+    linetype = 1,
+    colour = cbPalette[7]
+  ) +
+  ylim(0, 1) +  xlab('Geographic distances (km)') + ylab('Community similarity') +
+  ggtitle('Functional similarities', subtitle = mean_spa_slope_func)
+
+# Taxonomic distance decay along environmental distances --------------------------------------
+
+
+
+long_env_tax <- list()
+for (kk in 1:nrow(Tax)) {
+  eh_range <- seq(0, 1, 0.01)
+  long_env_tax[[kk]] <- data.frame(
+    x = eh_range,
+    y = sapply(eh_range, function(x)
+      (1 - exp(
+        Tax$Intercept_mean_env[kk]
+      )) * exp(-Tax$Slope_mean_env[kk] * x)),
+    Code = rep(Tax$Dataset[kk], length(eh_range))
+  )
+}
+new_data <- bind_rows(long_env_tax)
+panel_3 <- new_data %>% ggplot(aes(x = x, y = y, group = Code)) +
+  geom_line(
+    alpha = 0.5,
+    size = 1,
+    linetype = 1,
+    colour = cbPalette[6]
+  ) +
+  ylim(0, 1) + xlab('Environmental distances (Standardized)') + ylab('Community similarity') +
+  ggtitle('Taxonomic similarities', subtitle = mean_env_slope_tax)
+
+
+# Functional distance decay along environmental distances --------------------------------------------
+
+long_env_fun <- list()
+for (kk in 1:nrow(Func)) {
+  eh_range <- seq(0, 1, 0.01)
+  long_env_fun[[kk]] <- data.frame(
+    x = eh_range,
+    y = sapply(eh_range, function(x)
+      (1 - exp(
+        Func$Intercept_env[kk]
+      )) * exp(-Func$Slope_mean_env[kk] * x)),
+    Code = rep(Func$Dataset[kk], length(eh_range))
+  )
+}
+
+panel_4 <-
+  bind_rows(long_env_fun) %>% ggplot(aes(x = x, y = y, group = Code)) +
+  geom_line(
+    alpha = 0.5,
+    size = 1,
+    linetype = 1,
+    colour = cbPalette[7]
+  ) +
+  ylim(0, 1) + xlab('Environmental distances (Standardized)') + ylab('Community similarity') +
+  ggtitle('Functional similarities', subtitle = mean_env_slope_func)
+
+
+
+# strength of distance decay along spatial distances ------------------------------------------------------
+panel_5 <-
+results %>% filter(Based == "occ", Beta_type == "Total similarities") %>% 
+    mutate_at("Level",factor,levels=c("TAX","FUN")) %>% 
+  ggplot(aes(x = Level,y = Mantel_spa, fill = Level,colour=Level)) +
+  geom_paired_raincloud(alpha=.5)+
+  geom_point(aes(group = Dataset,colour=Level),
+             position = position_nudge(c(.16, -.16)),
+             alpha = .5, shape = 16) +
+  geom_line(aes(group = Dataset),colour="black",
+            position = position_nudge(c(.23, -.23)),
+            linetype = 3, size=.05,alpha=.5) +
+  geom_boxplot(aes(colour=Level),fill = NA, position = position_nudge(c(.07, -.07)),
+               alpha = .5, width = .04, outlier.shape = " ") +
+  scale_fill_manual(values=cbPalette[6:7]) +
+  scale_colour_manual(values=cbPalette[6:7]) +
+  labs(y="Mantel *r*",x=NULL) +
+  ggtitle("Strength of the spatial\ndistance decay")
+
+# Strength of distance decay along environmental distances ------------------------------------------------------
+
+panel_6 <-
+  results %>% filter(Based == "occ", Beta_type == "Total similarities") %>% 
+  mutate_at("Level",factor,levels=c("TAX","FUN")) %>% 
+  ggplot(aes(x = Level,y = Mantel_env, fill = Level,colour=Level)) +
+  geom_paired_raincloud(alpha=.5)+
+  geom_point(aes(group = Dataset,colour=Level),
+             position = position_nudge(c(.16, -.16)),
+             alpha = .5, shape = 16) +
+  geom_line(aes(group = Dataset),colour="black",
+            position = position_nudge(c(.23, -.23)),
+            linetype = 3, size=.05,alpha=.5) +
+  geom_boxplot(aes(colour=Level),fill = NA, position = position_nudge(c(.07, -.07)),
+               alpha = .5, width = .04, outlier.shape = " ") +
+  scale_fill_manual(values=cbPalette[6:7]) +
+  scale_colour_manual(values=cbPalette[6:7]) +
+  labs(y="Mantel *r*",x=NULL) +
+  ggtitle("Strength of the environmental\ndistance decay")
+
+if (params$based == "occ") {
+  
+  path <- "output_within/Null models/Occurrence"
+  } else { 
+  path<- "output_within/Null models/Abundance"
+  }
+datasets<-list.files(path)
+panel_7 <- bind_rows(lapply(datasets, function(x) read.csv(paste0(path,"/",x)))) %>%
+  mutate_at("X",factor) %>% 
+  mutate_at("X", fct_recode, "Total similarities" = "1", "Replacement" = "2", "Richness differences" = "3") %>% 
+  filter(X == params$component) %>% 
+  ggplot(aes(x=SES_spa)) + 
+  geom_histogram(fill = cbPalette[7])+
+  geom_vline(xintercept=c(-1.96,1.96), linetype=3,size=.2)+  labs(y="Number of datasets", x="Standardized effect size", title = "Null models for\nspatial distances") 
+
+panel_8 <- bind_rows(lapply(datasets,function(x) read.csv(paste0(path,"/",x)))) %>% 
+  mutate_at("X",factor) %>% 
+  mutate_at("X", fct_recode, "Total similarities" = "1", "Replacement" = "2", "Richness differences" = "3") %>% 
+  filter(X == params$component) %>% 
+  ggplot(aes(x=SES_env)) + 
+  geom_histogram(fill = cbPalette[7])+
+  geom_vline(xintercept=c(-1.96,1.96), linetype=3,size=.2)+
+  labs(y="Number of datasets", x="Standardized effect size",
+       title = "Null models for\nenvironmental distances") 
+```
+
+#figure 4
+
+Figure showing the distance decay relationship of each dataset considering the taxonomic and functional siilarities along spatial and environmental distaces, including the comparison between the  R² from taxonomic and functional similarities.
+
+```{r,save figure 4, fig.width=7, fig.height=4}
+figure_4 <-
+{panel_1+panel_2+panel_5+panel_7 + plot_layout(nrow=1)} /
+{panel_3+panel_4+panel_6+panel_8 + plot_layout(nrow=1)}   + plot_annotation(
+    title = "The shape and strength of the distance decay",
+    subtitle = params$subtitle,
+    theme = theme(
+      plot.title = element_text(
+        size = 14,
+        family = 'sans',
+        face = 'bold'
+      ),
+      plot.subtitle = element_text(size = 12, family = 'sans'),
+      plot.caption = element_text(
+        size = 10,
+        family = 'sans',
+        face = 'italic',
+        colour = 'gray30'
+      ),
+      plot.caption.position = 'plot'
+    )
+  )
+
+
+
+
+
+figure_4
+
+ggsave(figure_4,file=paste0('Figures/Figure_4_',params$based,'-',params$component,'.pdf'), width=14, height=8, units='in', device=pdf())
+```
+# Mean slope per biotic group
+
+```{r Analysis to figure 5, echo=FALSE, warning=FALSE, message=FALSE, include=TRUE}
+
+mean_spa_tax <- Tax %>%
+  group_by(Organism) %>%
+  mutate(Slope_mean_spa = Slope_mean_spa * -1) %>% 
+  dplyr::summarise(mean_slope = mean(Slope_mean_spa, na.rm = TRUE),
+            sd_slope = sd(Slope_mean_spa, na.rm = TRUE),
+            n_obs = n()) %>%
+  mutate(se_slope = sd_slope / sqrt(n_obs),
+         lower.ci= mean_slope - qt(1 - (0.05 / 2), n_obs - 1) * se_slope,
+         upper.ci= mean_slope + qt(1 - (0.05 / 2), n_obs - 1) * se_slope,
+         Gradient= "Spatial distance",
+         Level = "TAX")
+
+mean_env_tax<-Tax %>%
+  group_by(Organism) %>%
+    mutate(Slope_mean_env = Slope_mean_env * -1) %>% 
+  dplyr::summarise(mean_slope = mean(Slope_mean_env, na.rm = TRUE),
+            sd_slope = sd(Slope_mean_env, na.rm = TRUE),
+            n_obs = n()) %>%
+  mutate(se_slope = sd_slope / sqrt(n_obs),
+         lower.ci= mean_slope - qt(1 - (0.05 / 2), n_obs - 1) * se_slope,
+         upper.ci= mean_slope + qt(1 - (0.05 / 2), n_obs - 1) * se_slope,
+         Gradient= "Environmental distance",
+         Level = "TAX")
+
+mean_tax<-bind_rows(mean_spa_tax,mean_env_tax) %>% mutate_at("Gradient",factor,levels=c("Spatial distance","Environmental distance"))
+
+mean_spa_fun <-Func %>%
+  group_by(Organism) %>%
+      mutate(Slope_spa = Slope_spa * -1) %>% 
+  dplyr::summarise(mean_slope = mean(Slope_spa, na.rm = TRUE),
+            sd_slope = sd(Slope_spa, na.rm = TRUE),
+            n_obs = n()) %>%
+  mutate(se_slope = sd_slope / sqrt(n_obs),
+         lower.ci= mean_slope - qt(1 - (0.05 / 2), n_obs - 1) * se_slope,
+         upper.ci= mean_slope + qt(1 - (0.05 / 2), n_obs - 1) * se_slope,
+         Gradient= "Spatial distance",
+         Level = "FUN")
+
+mean_env_fun<-Func %>%
+  group_by(Organism) %>%
+      mutate(Slope_env = Slope_env * -1) %>% 
+  dplyr::summarise(mean_slope = mean(Slope_env, na.rm = TRUE),
+            sd_slope = sd(Slope_env, na.rm = TRUE),
+            n_obs = n()) %>%
+  mutate(se_slope = sd_slope / sqrt(n_obs),
+         lower.ci= mean_slope - qt(1 - (0.05 / 2), n_obs - 1) * se_slope,
+         upper.ci= mean_slope + qt(1 - (0.05 / 2), n_obs - 1) * se_slope,
+         Gradient= "Environmental distance",
+         Level = "FUN")
+
+mean_func<-bind_rows(mean_spa_fun,mean_env_fun) %>% mutate_at("Gradient",factor,levels=c("Spatial distance","Environmental distance"))
+
+```
+# Figure 5
+
+```{r save figure 5, fig.height=8, fig.width=10}
+
+Figure_5<- bind_rows(mean_tax,mean_func) %>%  
+  mutate_at("Level",factor,levels=c("TAX","FUN")) %>% 
+  ggplot()+
+  geom_segment(aes(x=reorder(Organism,n_obs),xend=Organism, y=lower.ci,
+        yend=upper.ci),size=.5)+
+  geom_point(aes(x=Organism, colour=Level,
+      y=mean_slope),size=3, shape=19,alpha=1.5)+
+  geom_hline(aes(yintercept=0), linetype=2)+
+  facet_grid(Level~Gradient, scales= "free_x")+
+  coord_flip()+
+  theme(strip.text.x= element_text(size=12),
+        strip.text.y = element_blank()) +
+  ylab('Average slope')+
+  xlab('')+
+  scale_colour_manual(values=cbPalette[6:7]) +
+  plot_annotation(title= "Rate of decay of biotic groups", subtitle=params$subtitle, theme = theme(plot.title = element_text(size = 14, family='sans', face='bold'),plot.subtitle = element_text(size = 12,family = 'sans'), plot.caption = element_text(size=0, family='sans', face = 'italic', colour='gray30'), plot.caption.position = 'plot'))
+
+Figure_5
+hist(T_spa$Latitude)
+
+ggplot2::ggsave(plot=Figure_5, filename=paste0('Figures/Figure_5_new_',params$based,'_',params$component,'.pdf'), width=10, height=8, units='in',device=cairo_pdf)
+```
+
+# BRT Analysis
+
+```{r, include=TRUE, echo=FALSE, warning=FALSE, message= FALSE}
+
+results<-  readxl::read_xlsx('input_between/input_between.xlsx') %>% 
+  mutate(Organism=dplyr::recode(Organism, 
+                                   TP = "Terrestrial vascular plants",
+                                   AT = "Arthropods",
+                                   MI = "Macroinvertebrates",
+                                   BD = "Benthic diatoms",
+                                   PP = "Phytoplankton",
+                                   FI = "Fish",
+                                   BI = "Birds",
+                                   AP = "Aquatic plants",
+                                   BT = "Bats",
+                                   CO = "Corals",
+                                   FR = "Foraminifera",
+                                   LC = "Lichens",
+                                   BF = "Butterflies",
+                                   BP = "Bryophytes",
+                                   FG = "Fungi",
+                                   AB = "Amphibians",
+                                   CI = "Ciliates"
+                                   )) %>% 
+  mutate_at("Organism", factor, levels= c("Terrestrial vascular plants","Arthropods", "Macroinvertebrates",
+                                              "Benthic diatoms","Phytoplankton",
+                                              "Fish", "Birds","Aquatic plants",
+                                              "Bats", "Corals", "Foraminifera", 
+                                              "Lichens", "Butterflies", "Bryophytes",
+                                              "Fungi", "Amphibians", "Ciliates" )) %>% 
+  mutate_at("gamma_trait", log) %>% 
+  mutate_at("Level", factor, levels=c("TAX","FUN")) %>%
+  mutate_at(vars("Dispersal_mode"), factor) %>%
+  mutate_at("Realm", fct_recode, FRE = "Freshwaters", MAR = "Marine", TER = "Terrestrial") %>%
+  mutate_at("Realm", factor, levels=c("FRE","TER","MAR")) %>%
+  mutate_at(vars(gamma_spe,n_sites,spa_max,n_traits,n_var),log10) %>% 
+  dplyr::mutate(across(c("Slope_mean_spa","Slope_spa"), ~ -.x))
+  
+
+Tax<- results %>% filter( Based == params$based & 
+                          Beta_type == params$component &
+                          Level == "TAX") #dataframe with only taxonomical results
+
+Func <- results %>% filter( Based == params$based  & 
+                          Beta_type == params$component &
+                          Level == "FUN") #dataframe with only functional results
+
+T_spa <- Tax    %>% dplyr::select(Slope_mean_spa,Latitude, spa_max, Realm, Body_size, Dispersal_mode, n_sites, gamma_spe) 
+F_spa <- Func   %>% dplyr::select(Slope_spa,Latitude, spa_max, Realm, Body_size, Dispersal_mode, n_sites, gamma_trait)
+T_env <- Tax    %>% dplyr::select(Slope_mean_env, Latitude,  spa_max, Realm, Body_size, Dispersal_mode, n_var, gamma_spe)
+F_env <- Func   %>% dplyr::select(Slope_env, Latitude, spa_max, Realm, Body_size, Dispersal_mode, n_var, gamma_trait)
+
+
+set.seed(123);M1_negative<- dds.brt(data.frame(T_spa), tc= 5, lr=0.001, bf=0.7, family='laplace', simplify=FALSE)
+set.seed(123);M2<- dds.brt(data.frame(F_spa), tc=5, lr=0.001, bf=0.7, family='laplace',simplify = FALSE)
+set.seed(123);M3<- dds.brt(data.frame(T_env), tc=5, lr=0.001, bf=0.7, family='laplace',simplify = FALSE)
+set.seed(123);M4<- dds.brt(data.frame(F_env), tc= 5, lr=0.00001, bf=0.7, family='laplace',simplify = FALSE)
+gbm.plot(M1$model)
+  brt_results<-data.frame(Model = c(
+      'Taxonomic spatial DDS',
+      'Functional spatial DDS',
+      'Taxonomic environmental DDS',
+      'Functional environmental DDS'
+    ),rbind(M1$main,M2$main,M3$main,M4$main))
+plot(M1$model)
+plot(M1_negative$model)
+
+```
+
+```{r}
+gbm.interactions(M1$model) #gamma_spe vs n_sites
+gbm.interactions(M2$model)  #gamma_spe vs n_sites
+gbm.interactions(M3$model) #gamma_spe	vs Body_size #spa_max vs Latitude
+gbm.interactions(M4$model) #gamma_trait	vs	n_var
+
+
+gbm.perspec(M1$model,x=2,y=1, z.range=c(0,2))
+```
+
+#Sensitivity analysis
+
+```{r}
+#Check how results change with reducing sample size for  90% 70% 50%
+
+set.seed(123);M1_100<- T_spa  %>% data.frame %>%  dds.brt(., tc= 5, lr=0.001, bf=0.7, family='laplace', simplify=FALSE)
+set.seed(123);M2_100<- F_spa  %>% data.frame %>%  dds.brt(., tc= 5, lr=0.001, bf=0.7, family='laplace', simplify=FALSE)
+
+
+#90% of the samples 
+set.seed(123);M1_90<- T_spa %>%  slice_sample(prop=.9) %>% data.frame %>%  dds.brt(., tc= 5, lr=0.001, bf=0.7, family='laplace', simplify=FALSE)
+set.seed(123);M2_90<- F_spa %>%  slice_sample(prop=.9) %>% data.frame %>%  dds.brt(., tc= 5, lr=0.001, bf=0.7, family='laplace', simplify=FALSE)
+set.seed(123);M3_90<- T_env %>%  slice_sample(prop=.9) %>% data.frame %>%  dds.brt(., tc= 5, lr=0.001, bf=0.7, family='laplace', simplify=FALSE)
+set.seed(123);M4_90<- F_env %>%  slice_sample(prop=.9) %>% data.frame %>%  dds.brt(., tc= 5, lr=0.001, bf=0.7, family='laplace', simplify=FALSE)
+
+
+
+#70% of the samples 
+set.seed(123);M1_70<- T_spa %>%  slice_sample(prop=.7) %>% data.frame %>%  dds.brt(., tc= 5, lr=0.001, bf=0.7, family='laplace', simplify=FALSE)
+set.seed(123);M2_70<- F_spa %>%  slice_sample(prop=.7) %>% data.frame %>%  dds.brt(., tc= 5, lr=0.001, bf=0.7, family='laplace', simplify=FALSE)
+set.seed(123);M3_70<- T_env %>%  slice_sample(prop=.7) %>% data.frame %>%  dds.brt(., tc= 5, lr=0.001, bf=0.7, family='laplace', simplify=FALSE)
+set.seed(123);M4_70<- F_env %>%  slice_sample(prop=.7) %>% data.frame %>%  dds.brt(., tc= 5, lr=0.001, bf=0.7, family='laplace', simplify=FALSE)
+
+#50% of the samples 
+set.seed(123);M1_50<- T_spa %>%  slice_sample(prop=.5) %>% data.frame %>%  dds.brt(., tc= 5, lr=0.001, bf=0.7, family='laplace', simplify=FALSE)
+set.seed(123);M2_50<- F_spa %>%  slice_sample(prop=.5) %>% data.frame %>%  dds.brt(., tc= 5, lr=0.001, bf=0.7, family='laplace', simplify=FALSE)
+set.seed(122);M3_50<- T_env %>%  slice_sample(prop=.5) %>% data.frame %>%  dds.brt(., tc= 5, lr=0.001, bf=0.7, family='laplace', simplify=FALSE)
+set.seed(123);M4_50<- F_env %>%  slice_sample(prop=.5) %>% data.frame %>%  dds.brt(., tc= 5, lr=0.001, bf=0.7, family='laplace', simplify=FALSE)
+
+plot_M1_data <-  map(names(T_spa)[-1], ~ partial_dependence(M1_100$model, var=.x)) %>% bind_rows %>%  mutate(Proportion = "100%") %>% 
+                 bind_rows( map(names(T_spa)[-1], ~ partial_dependence(M1_90$model, var=.x)) %>% bind_rows %>%  mutate(Proportion = "90%")) %>% 
+                 bind_rows( map(names(T_spa)[-1], ~ partial_dependence(M1_70$model, var=.x)) %>% bind_rows %>%  mutate(Proportion = "70%")) %>% 
+                 bind_rows( map(names(T_spa)[-1], ~ partial_dependence(M1_50$model, var=.x)) %>% bind_rows %>%  mutate(Proportion = "50%")) 
+
+plot_M1_data %>%
+    dplyr::mutate(Proportion = factor(Proportion, levels=c("100%","90%","70%","50%"))) %>% 
+  group_by(Proportion, variable) %>% 
+  dplyr::mutate(fitted_function= (fitted_function-mean(fitted_function))/mean(fitted_function)) %>% 
+  filter(!variable %in% c("Dispersal_mode", "Realm")) %>% 
+  ggplot(aes(x=value, y=fitted_function*100, alpha = Proportion)) + 
+  geom_line(size=1) +
+  facet_wrap(~variable, scales="free")+
+  theme_minimal() +
+  scale_alpha_manual(values=c(1,.7,.5,.3)) + 
+  labs(title = "Sensitivity analysis", subtitle =  "Taxonomic similarities along spatial gradients", x="Predictor", y="Relative effect\n on mean slope (%)")+
+  theme(plot.title.position = "plot")
+ggsave(filename="sensitivity_tax.pdf")
+
+
+plot_M2_data <-  map(names(F_spa)[-1], ~ partial_dependence(M2_100$model, var=.x)) %>% bind_rows %>%  mutate(Proportion = "100%") %>% 
+                 bind_rows( map(names(F_spa)[-1], ~ partial_dependence(M2_90$model, var=.x)) %>% bind_rows %>%  mutate(Proportion = "90%")) %>% 
+                 bind_rows( map(names(F_spa)[-1], ~ partial_dependence(M2_70$model, var=.x)) %>% bind_rows %>%  mutate(Proportion = "70%")) %>% 
+                 bind_rows( map(names(F_spa)[-1], ~ partial_dependence(M2_50$model, var=.x)) %>% bind_rows %>%  mutate(Proportion = "50%")) 
+
+plot_M2_data %>% 
+  dplyr::mutate(Proportion = factor(Proportion, levels=c("100%","90%","70%","50%"))) %>% 
+  group_by(Proportion, variable) %>% 
+  dplyr::mutate(fitted_function= fitted_function-mean(fitted_function)) %>% 
+  filter(!variable %in% c("Dispersal_mode", "Realm")) %>% 
+  ggplot(aes(x=value, y=fitted_function*100, alpha = Proportion)) + 
+  geom_line(size=1) +
+  facet_wrap(~variable, scales="free")+
+  theme_minimal() +
+  scale_alpha_manual(values=c(1,.7,.5,.3)) + 
+  labs(title = "Sensitivity analysis", subtitle =  "Functional similarities along spatial gradients", x="Predictor", y="Relative effect\n on mean slope (%)", alpha = "Proportion of sample size")+
+  theme(plot.title.position = "plot")
+ggsave(filename="sensitivity_fun.pdf")
+
+```
+
+
+```{r BRT table}
+brt_results %>% kable(caption = 'Summary of BRT results showing: (ED) Explained deviance, (Length) Number of samples in the model, (N_tree) Number of trees from the model, (Tree_complexity) complexity of the models, Learning rate and bag fraction of each model') %>% kable_styling()
+```
+
+# Hypotheses test
+
+```{r, echo=FALSE, include=TRUE}
+df<-rbind(pdplot(M1$model,'Taxonomic'),
+                      pdplot(M2$model,'Functional')) 
+df2<-rbind(pdplot(M3$model,'Taxonomic'),
+                              pdplot(M4$model,'Functional')) 
+
+
+lat_S<-subset(df, var == 'Latitude') %>% mutate_at("predictor", as.numeric)
+ext_S<-subset(df, var == 'spa_max') %>% mutate_at("predictor", as.numeric)
+realm_S<-subset(df, var == 'Realm')  
+
+
+
+lat_E<- subset(df2, var == 'Latitude') %>% mutate_at("predictor", as.numeric)
+ext_E<- subset(df2, var == 'spa_max') %>% mutate_at("predictor", as.numeric)
+realm_E<-subset(df2, var == 'Realm')
+
+```
+
+
+```{r, echo=FALSE, include=TRUE}
+#Latitude plots ----
+
+lab1 = round(subset(M1$model$contributions, var == 'Latitude')[, 2], 1)
+lab2 = round(subset(M2$model$contributions, var == 'Latitude')[, 2], 1)
+
+h1_a <-
+  ggplot(data = lat_S,
+         aes(
+           x = as.numeric(predictor),
+           y = fitted_function,
+           group = group,
+           colour = group
+         )) +
+  geom_rug(aes(x=rep(T_spa$Latitude,2)-1), colour='black', sides='b')+
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_smooth(size = 1.5, se = FALSE, method = 'loess') +
+  geom_line(alpha = .2, size = 2) +
+  scale_colour_manual(values = cbPalette[c(7, 6)]) +
+  ggtitle(expression('(H'['2a']*') Latitude')) + #, subtitle='Mean value of sampling units\n')+
+  xlab('Absolute latitude\n(degrees)') +
+  ylab('Relative effect\n on mean slope (%)') +
+  scale_x_continuous(breaks=as.integer((seq(quantile(T_spa$Latitude,.025),quantile(T_spa$Latitude,.975),length.out=4))),limits=c(quantile(T_spa$Latitude,.025),quantile(T_spa$Latitude,.975)))+
+  theme_agile(
+    base_family = 'sans',
+    base_size = 18,
+    grid_cols = 'white'
+  ) +
+  theme(plot.subtitle = element_text(
+    size = 15,
+    hjust = 0,
+    color = "black"
+  ),  panel.background = element_rect(fill = "gray90",
+                                colour = "gray90",
+                                size = 0.5, linetype = "solid")) +
+  theme(plot.title = element_text(size = 20, face='plain'), axis.title.x = element_text(vjust=-1)) +
+  theme(legend.position = 'none') +
+  
+  annotate(
+    'text',
+    -Inf,
+    Inf,
+    hjust = -.1,
+    vjust = 1,
+    label = paste0('TAX: ', lab1, '%'),
+    colour = cbPalette[6],
+    size = 6
+  ) +
+  annotate(
+    'text',
+    -Inf,
+    Inf,
+    hjust = -.1,
+    vjust = 2.2,
+    label = paste0('FUN: ', lab2, '%'),
+    colour = cbPalette[7],
+    size = 6
+  )
+
+length(unique(c(which(Func$Slope_mean_env == 0),which(Func$Slope_mean_spa == 0))))
+length(unique(c(which(Tax$Slope_env == 0),which(Tax$Slope_spa == 0))))
+
+lab1 = round(subset(M3$model$contributions, var == 'Latitude')[, 2], 1)
+lab2 = round(subset(M4$model$contributions, var == 'Latitude')[, 2], 1)
+h1_b <-
+  ggplot(data = lat_E,
+         aes(
+           x = predictor,
+           y = fitted_function,
+           group = group,
+           colour = group
+         ))   + 
+  geom_rug(aes(x=rep(T_env$Latitude,2)-1), colour='black', sides='b')+
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_smooth(size = 1.5, se = FALSE, method = 'loess') +
+  geom_line(alpha = .2, size = 2) +
+  scale_colour_manual(values = cbPalette[c(7, 6)]) +
+  ggtitle(expression('(H'['2b']*') Latitude')) + #, subtitle='Mean value of sampling units\n')+
+  xlab('Absolute latitude\n(degrees)') +
+  ylab('Relative effect\n on mean slope (%)') +
+   scale_x_continuous(breaks=as.integer((seq(quantile(T_env$Latitude,.025),quantile(T_env$Latitude,.975),length.out=4))),limits=c(quantile(T_env$Latitude,.025),quantile(T_env$Latitude,.975)))+
+  theme_agile(
+    base_family = 'sans',
+    plot_grid = TRUE,
+    base_size = 18,
+    grid_cols = 'white'
+  ) +
+  theme(plot.subtitle = element_text(
+    size = 15,
+    hjust = 0,
+    color = "black"
+  ),  panel.background = element_rect(fill = "gray90",
+                                colour = "gray90",
+                                size = 0.5, linetype = "solid")) +
+  theme(plot.title = element_text(size = 20, face='plain')) +
+  theme(legend.position = 'none') +
+  annotate(
+    'text',
+    -Inf,
+    -Inf,
+    hjust = -.1,
+    vjust = -1.7,
+    label = paste0('TAX: ', lab1, '%'),
+    colour = cbPalette[6],
+    size = 6
+  ) +
+  annotate(
+    'text',
+    -Inf,
+    -Inf,
+    hjust = -.1,
+    vjust =-.5,
+    label = paste0('FUN: ', lab2, '%'),
+    colour = cbPalette[7],
+    size = 6
+  )
+# spatial Extent plot -----------------------------------------------------------------------------------------------
+lab1 = round(subset(M1$model$contributions, var == 'spa_max')[, 2], 1)
+lab2 = round(subset(M2$model$contributions, var == 'spa_max')[, 2], 1)
+h2_a <-
+  ggplot(data = ext_S,
+         aes(
+           x = as.numeric(predictor),
+           y = fitted_function,
+           group = group,
+           colour = group
+         )) + 
+  geom_rug(aes(x=rep(T_spa$spa_max,2)-1), colour='black', sides='b')+
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_smooth(size = 1.5, se = FALSE, method = 'loess') +
+  geom_line(alpha = .2, size = 2) +
+  scale_colour_manual(values = cbPalette[c(7, 6)]) +
+  ggtitle(expression('(H'['3a']*') Spatial extent')) +
+  xlab('Kilometres') +
+  ylab('Relative effect\n on mean slope (%)') +
+   scale_x_continuous(
+     breaks=as.integer((seq(quantile(T_spa$spa_max,.025),quantile(T_spa$spa_max,.975),length.out=4))),
+     labels=as.integer((10^seq(quantile(T_spa$spa_max,.025),quantile(T_spa$spa_max,.975),length.out=4))),
+     limits=c(quantile(T_spa$spa_max,.025),quantile(T_spa$spa_max,.975)))+
+  theme_agile(
+    base_family = 'sans',
+    plot_grid = TRUE,
+    base_size = 18,
+    grid_cols = 'white'
+  ) +
+  theme(plot.subtitle = element_text(
+    size = 15,
+    hjust = 0,
+    color = "black"
+  ),  panel.background = element_rect(fill = "gray90",
+                                colour = "gray90",
+                                size = 0.5, linetype = "solid")) +
+  theme(plot.title = element_text(size = 20, face='plain'), axis.title.y = element_blank()) +
+  theme(legend.position = 'none') +
+  annotate(
+    'text',
+    -Inf,
+    -Inf,
+    hjust = -.1,
+    vjust = -1.7,
+    label = paste0('TAX: ', lab1, '%'),
+    colour = cbPalette[6],
+    size = 6
+  ) +
+  annotate(
+    'text',
+    -Inf,
+    -Inf,
+    hjust = -.1,
+    vjust =-.5,
+    label = paste0('FUN: ', lab2, '%'),
+    colour = cbPalette[7],
+    size = 6
+  )
+
+# environmental extent --------------------------------------------------------------------------------
+
+lab1 = round(subset(M3$model$contributions, var == 'spa_max')[, 2], 1)
+lab2 = round(subset(M4$model$contributions, var == 'spa_max')[, 2], 1)
+
+
+h2_b <-
+  ggplot(data = ext_E,
+         aes(
+           x = as.numeric(predictor),
+           y = fitted_function,
+           group = group,
+           colour = group
+         )) +
+ geom_rug(aes(x=rep(T_env$spa_max,2)-1), colour='black', sides='b')+
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_smooth(size = 1.5, se = FALSE, method = 'loess') +
+  geom_line(alpha = .2, size = 2) +
+  scale_colour_manual(values = cbPalette[c(7, 6)]) +
+  ggtitle(expression('(H'['3b']*') Spatial extent')) + #, subtitle='Maximum distance \nbetween sampling units')+
+  xlab('Kilometres') +
+  ylab('Relative effect\n on mean slope (%)') +
+   scale_x_continuous(
+     breaks=as.integer((seq(quantile(T_env$spa_max,.025),quantile(T_env$spa_max,.975),length.out=4))),
+     labels=as.integer((10^seq(quantile(T_env$spa_max,.025),quantile(T_env$spa_max,.975),length.out=4))),
+     limits=c(quantile(T_env$spa_max,.025),quantile(T_env$spa_max,.975)))+
+  theme_agile(
+    base_family = 'sans',
+    plot_grid = TRUE,
+    base_size = 18,
+    grid_cols = 'white'
+  ) +
+  theme(plot.subtitle = element_text(
+    size = 15,
+    hjust = 0,
+    color = "black"
+  ),  panel.background = element_rect(fill = "gray90",
+                                colour = "gray90",
+                                size = 0.5, linetype = "solid")) +
+  theme(plot.title = element_text(size = 20, face='plain'), axis.title.y = element_blank()) +
+  theme(legend.position = 'none') +
+  annotate(
+    'text',
+    -Inf,
+    -Inf,
+    hjust = -.1,
+    vjust = -1.7,
+    label = paste0('TAX: ', lab1, '%'),
+    colour = cbPalette[6],
+    size = 6
+  ) +
+  annotate(
+    'text',
+    -Inf,
+    -Inf,
+    hjust = -.1,
+    vjust =-.5,
+    label = paste0('FUN: ', lab2, '%'),
+    colour = cbPalette[7],
+    size = 6
+  )
+
+#Realm plots -----------------------------------------------------------------------------------------
+
+lab1 = round(subset(M1$model$contributions, var == 'Realm')[, 2], 1)
+lab2 = round(subset(M2$model$contributions, var == 'Realm')[, 2], 1)
+
+h3_a <- ggplot(realm_S, aes(y = fitted_function)) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_segment(
+    data = subset(realm_S, group == 'Taxonomic'),
+    aes(
+      x = as.integer(factor(predictor)) - .10 ,
+      y = 0,
+      xend = as.integer(factor(predictor)) - .10,
+      yend = fitted_function
+    ),
+    color = 'black'
+  ) +
+  geom_point(
+    data = subset(realm_S, group == 'Taxonomic'),
+    aes(x = as.integer(factor(predictor)) - .10, y = fitted_function),
+    colour = cbPalette[6],
+    size = 4
+  ) +
+  geom_segment(
+    data = subset(realm_S, group == 'Functional'),
+    aes(
+      x = as.integer(factor(predictor)) + .10 ,
+      y = 0,
+      xend = as.integer(factor(predictor)) + .10,
+      yend = fitted_function
+    ),
+    color = 'black'
+  ) +
+  geom_point(
+    data = subset(realm_S, group == 'Functional'),
+    aes(x = as.integer(factor(predictor)) + .10, y = fitted_function),
+    colour = cbPalette[7],
+    size = 4
+  ) +
+  ggtitle(expression('(H'['4a']*') Realms')) +
+  xlab(expression('')) +
+  ylab('Relative effect\n on mean slope (%)') +
+  theme_agile(
+    base_family = 'sans',
+    plot_grid = TRUE,
+    base_size = 18,
+    grid_cols = 'white'
+  ) +
+  theme(plot.subtitle = element_text(
+    size = 15,
+    hjust = 0,
+    color = "black"
+  ),  panel.background = element_rect(fill = "gray90",
+                                colour = "gray90",
+                                size = 0.5, linetype = "solid")) +
+  theme(plot.title = element_text(size = 20, face='plain'), axis.title.y = element_blank()) +
+  theme(legend.position = 'none') +
+  scale_x_continuous(
+    breaks = c(1, 2, 3),
+    labels = c('FRE', 'MAR', 'TER'),
+    limits = c(.5, 3.5),
+  ) + 
+  annotate(
+    'text',
+    -Inf,
+    -Inf,
+    hjust = -.1,
+    vjust = -1.7,
+    label = paste0('TAX: ', lab1, '%'),
+    colour = cbPalette[6],
+    size = 6
+  ) +
+  annotate(
+    'text',
+    -Inf,
+    -Inf,
+    hjust = -.1,
+    vjust =-.5,
+    label = paste0('FUN: ', lab2, '%'),
+    colour = cbPalette[7],
+    size = 6
+  )
+
+lab1 = round(subset(M3$model$contributions, var == 'Realm')[, 2], 1)
+lab2 = round(subset(M4$model$contributions, var == 'Realm')[, 2], 1)
+h3_b <- ggplot(realm_E, aes(y = fitted_function)) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_segment(
+    data = subset(realm_E, group == 'Taxonomic'),
+    aes(
+      x = as.integer(factor(predictor)) - .10 ,
+      y = 0,
+      xend = as.integer(factor(predictor)) - .10,
+      yend = fitted_function
+    ),
+    color = 'black'
+  ) +
+  geom_point(
+    data = subset(realm_E, group == 'Taxonomic'),
+    aes(x = as.integer(factor(predictor)) - .10, y = fitted_function),
+    colour = cbPalette[6],
+    size = 4
+  ) +
+  geom_segment(
+    data = subset(realm_E, group == 'Functional'),
+    aes(
+      x = as.integer(factor(predictor)) + .10 ,
+      y = 0,
+      xend = as.integer(factor(predictor)) + .10,
+      yend = fitted_function
+    ),
+    color = 'black'
+  ) +
+  geom_point(
+    data = subset(realm_E, group == 'Functional'),
+    aes(x = as.integer(factor(predictor)) + .10, y = fitted_function),
+    colour = cbPalette[7],
+    size = 4
+  ) +
+  ggtitle(expression('(H'['4b']*') Realms')) +
+  xlab(expression('')) +
+  ylab('Relative effect\n on mean slope (%)') +
+  theme_agile(
+    base_family = 'sans',
+    plot_grid = TRUE,
+    base_size = 18,
+    grid_cols = 'white'
+  ) +
+  theme(plot.subtitle = element_text(
+    size = 15,
+    hjust = 0,
+    color = "black"
+  ),  panel.background = element_rect(fill = "gray90",
+                                colour = "gray90",
+                                size = 0.5, linetype = "solid")) +
+  theme(plot.title = element_text(size = 20, face='plain'), axis.title.y = element_blank()) +
+  theme(legend.position = 'none')+
+  scale_x_continuous(
+    breaks = c(1, 2, 3),
+    labels = c('FRE', 'MAR', 'TER'),
+    limits = c(.5, 3.5),
+  ) + 
+   annotate(
+    'text',
+    -Inf,
+    -Inf,
+    hjust = -.1,
+    vjust = -1.7,
+    label = paste0('TAX: ', lab1, '%'),
+    colour = cbPalette[6],
+    size = 6
+  ) +
+  annotate(
+    'text',
+    -Inf,
+    -Inf,
+    hjust = -.1,
+    vjust =-.5,
+    label = paste0('FUN: ', lab2, '%'),
+    colour = cbPalette[7],
+    size = 6
+  )
+```
+
+
+##Figure 6
+
+```{r save figure 6, fig.width=6.5, fig.height=4.5, echo=FALSE, message=FALSE, warning=FALSE}
+
+Figure_6<- {(h1_a|h2_a|h3_a)}/{(h1_b|h2_b|h3_b)} +
+plot_annotation(title='Effects of geographic factors on the rate of decay', subtitle= params$subtitle) & theme(plot.title=element_text(size=20, family = 'sans', face='bold'), plot.subtitle=element_text(size=18, family='sans'))
+Figure_6
+ggplot2::ggsave(plot=Figure_6,  filename = paste0("Figures/Figure_6_", params$based,'_',params$component,'.pdf'), width=13, height=9, unit='in', device=pdf())
+
+```
+
+
+#Organismal variables
+
+```{r figure 6b}
+
+
+dm_S <- subset(df, var == 'Dispersal_mode')
+bs_S <- subset(df, var == 'Body_size')
+gd_S <- subset(df, var == 'gamma_spe')
+td_S <- subset(df, var == 'gamma_trait')
+ns_S <- subset(df, var == 'n_sites')
+
+bs_E <- subset(df2, var == 'Body_size')
+dm_E <- subset(df2, var == 'Dispersal_mode')
+gd_E <- subset(df2, var == 'gamma_spe')
+td_E <- subset(df2, var == 'gamma_trait')
+nvar_E <- subset(df2, var == 'n_var')
+
+
+#Dispersal mode plots ===================================================================
+lab1 = round(subset(M1$model$contributions, var == 'Dispersal_mode')[, 2], 1)
+
+dm_a <- ggplot(dm_S, aes(y = fitted_function)) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_segment(
+    data = subset(dm_S, group == 'Taxonomic'),
+    aes(
+      x = as.integer(factor(predictor)) ,
+      y = 0,
+      xend = as.integer(factor(predictor)),
+      yend = fitted_function
+    ),
+    color = 'black'
+  ) +
+  geom_point(
+    data = subset(dm_S, group == 'Taxonomic'),
+    aes(x = as.integer(factor(predictor)), y = fitted_function),
+    colour = cbPalette[6],
+    size = 3
+  ) +
+  ggtitle('', subtitle = '(1) Dispersal mode') +
+  xlab(expression('')) +
+  ylab('Relative effect\n on mean slope (%)') +
+  theme_agile(
+    base_family = 'sans',
+    plot_grid = TRUE,
+    base_size = 12,
+    grid_cols = 'white'
+  ) +
+  theme(
+    axis.text.x = element_text(
+      color = "black",
+      angle = 20,
+      hjust = 1
+    ),
+    panel.background = element_rect(
+      fill = "gray90",
+      colour = "gray90",
+      size = 0.5,
+      linetype = "solid"
+    )
+  ) +
+  theme(plot.title = element_text(size = 10), 
+        plot.margin = margin(0, 0, 0, 0)
+        ) +
+  theme(legend.position = 'none') +
+  scale_x_continuous(
+    breaks = c(1, 2, 3),
+    labels = c('Active', 'Passive', 'Seeds'),
+    limits = c(.5, 3.5)
+  ) +
+  annotate(
+    'text',
+    -Inf,
+    Inf,
+    hjust = -.1,
+    vjust = 1.3,
+    label = paste0('TAX: ', lab1, '%'),
+    colour = cbPalette[6],
+    size = 5
+  )
+# DM_B ----------------------------------------------------------------------------------
+lab1 = round(subset(M3$model$contributions, var == 'Dispersal_mode')[, 2], 1)
+dm_b <- ggplot(dm_E, aes(y = fitted_function)) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_segment(
+    data = subset(dm_E, group == 'Taxonomic'),
+    aes(
+      x = as.integer(factor(predictor)) ,
+      y = 0,
+      xend = as.integer(factor(predictor)),
+      yend = fitted_function
+    ),
+    color = 'black'
+  ) +
+  geom_point(
+    data = subset(dm_E, group == 'Taxonomic'),
+    aes(x = as.integer(factor(predictor)), y = fitted_function),
+    colour = cbPalette[6],
+    size = 3
+  ) +
+  ggtitle('', subtitle = '(1) Dispersal mode') +
+  xlab(expression('')) +
+  ylab('Relative effect\n on mean slope (%)') +
+  theme_agile(
+    base_family = 'sans',
+    plot_grid = TRUE,
+    base_size = 14,
+    grid_cols = 'white'
+  ) +
+  theme(
+    axis.text.x = element_text(
+      #vjust = 5,
+      color = "black",
+      angle = 20,
+      hjust = 1
+    ),
+    panel.background = element_rect(
+      fill = "gray90",
+      colour = "gray90",
+      size = 0.5,
+      linetype = "solid"
+    )
+  ) +
+  theme(plot.title = element_text(size = 12), plot.margin = margin(0, 0, 0, 0)
+        ) +
+  theme(legend.position = 'none') +
+  scale_x_continuous(
+    breaks = c(1, 2, 3),
+    labels = c('Active', 'Passive', 'Seeds'),
+    limits = c(.5, 3.5)
+  ) +
+  annotate(
+    'text',
+    -Inf,
+    Inf,
+    hjust = -.1,
+    vjust = 1.3,
+    label = paste0('TAX: ', lab1, '%'),
+    colour = cbPalette[6],
+    size = 5
+  )
+
+#Body size plots ----
+lab1 = round(subset(M1$model$contributions, var == 'Body_size')[, 2], 1)
+lab2 = round(subset(M2$model$contributions, var == 'Body_size')[, 2], 1)
+bs_a <-
+  ggplot(data = bs_S,
+         aes(
+           x = as.numeric(predictor),
+           y = fitted_function,
+           group = group,
+           colour = group
+         )) +
+  geom_hline(yintercept = 0, linetype = 3) + 
+  geom_rug(aes(x = rep(T_spa$Body_size, 2)), colour = 'black', sides = 'b') +
+  geom_smooth(size = 1.5, se = FALSE, method = 'loess',formula="y~x", na.rm=TRUE) +
+  geom_line(alpha = .2, size = 2, na.rm=TRUE) +
+   scale_x_continuous(breaks=as.integer((seq(quantile(T_spa$Body_size,.025),quantile(T_spa$Body_size,.975),length.out=4))),limits=c(quantile(T_spa$Body_size,.025),quantile(T_spa$Body_size,.975)))+
+  scale_colour_manual(values = cbPalette[c(7, 6)]) +
+  ggtitle('', subtitle = '(2) Body size') +
+  xlab(expression('Body size (Log'[10] * ' grams)')) +
+  ylab('Relative effect\n on mean slope (%)') +
+  theme_agile(
+    base_family = 'sans',
+    plot_grid = TRUE,
+    base_size = 14,
+    grid_cols = 'white'
+  ) +
+  theme(
+    axis.title.x = element_text(vjust = 5, color = "black"),
+    panel.background = element_rect(
+      fill = "gray90",
+      colour = "gray90",
+      size = 0.5,
+      linetype = "solid"
+    )
+  ) +
+  theme(
+    plot.title = element_text(size = 12),
+    axis.title.y = element_blank(), plot.margin = margin(0, 0, 0, 0)
+  ) +
+  theme(legend.position = 'none') +
+  annotate(
+    'text',
+    -Inf,
+    Inf,
+    hjust = -.1,
+    vjust = 1.3,
+    label = paste0('TAX: ', lab1, '%'),
+    colour = cbPalette[6],
+    size = 5
+  ) +
+  annotate(
+    'text',
+    -Inf,
+    Inf,
+    hjust = -.1,
+    vjust = 1,
+    label = paste0('\nFUN: ', lab2, '%'),
+    colour = cbPalette[7],
+    size = 5
+  )
+
+
+lab1 = round(subset(M3$model$contributions, var == 'Body_size')[, 2], 1)
+lab2 = round(subset(M4$model$contributions, var == 'Body_size')[, 2], 1)
+bs_b <-
+  ggplot(data = bs_E,
+         aes(
+           x = as.numeric(predictor),
+           y = fitted_function,
+           group = group,
+           colour = group
+         )) +
+  geom_hline(yintercept = 0, linetype = 3) + 
+  geom_rug(aes(x = rep(T_env$Body_size, 2)), colour = 'black', sides = 'b') +
+  geom_smooth(size = 1.5, se = FALSE, method = 'loess',formula="y~x", na.rm=TRUE) +
+  geom_line(alpha = .2, size = 2, na.rm=TRUE) +
+   scale_x_continuous(
+     breaks=as.integer((seq(quantile(T_env$Body_size,.025),quantile(T_env$Body_size,.975),length.out=4))),
+     limits=c(quantile(T_env$Body_size,.025),quantile(T_env$Body_size,.975)))+
+    scale_colour_manual(values = cbPalette[c(7, 6)]) +
+    ggtitle('', subtitle = '(2) Body size') +
+  xlab(expression('Body size (Log'[10] * ' grams)')) +
+  ylab('Relative effect\n on mean slope (%)') +
+  theme_agile(
+    base_family = 'sans',
+    plot_grid = TRUE,
+    base_size = 14,
+    grid_cols = 'white'
+  ) +
+  theme(
+    axis.title.x = element_text(vjust = 5, color = "black"),
+    panel.background = element_rect(
+      fill = "gray90",
+      colour = "gray90",
+      size = 0.5,
+      linetype = "solid"
+    )
+  ) +
+  theme(
+    plot.title = element_text(size = 10),
+    axis.title.y = element_blank(), plot.margin = margin(0, 0, 0, 0)
+  ) +
+  theme(legend.position = 'none') +
+  annotate(
+    'text',
+    -Inf,
+    Inf,
+    hjust = -.1,
+    vjust = 1.3,
+    label = paste0('TAX: ', lab1, '%'),
+    colour = cbPalette[6],
+    size = 5
+  ) +
+  annotate(
+    'text',
+    -Inf,
+    Inf,
+    hjust = -.1,
+    vjust = 1,
+    label = paste0('\nFUN: ', lab2, '%'),
+    colour = cbPalette[7],
+    size = 5
+  )
+
+
+#Gamma div plots ----
+lab1 = round(subset(M1$model$contributions, var == 'gamma_spe')[, 2], 1)
+
+gd_a <-
+  ggplot(data = gd_S,
+         aes(
+           x = as.numeric(predictor),
+           y = fitted_function,
+           group = group,
+           colour = group
+         )) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_rug(aes(x = rep(T_spa$gamma_spe, 1)), colour ='black', sides = 'b') +
+  geom_smooth(size = 1.5, se = FALSE, method = 'loess',formula="y~x", na.rm=TRUE) +
+  geom_line(alpha = .2, size = 2, na.rm=TRUE) +
+  scale_x_continuous(
+    breaks=round(seq(quantile(T_spa$gamma_spe,.025),quantile(T_spa$gamma_spe,.975),length.out=4),2),
+    labels=round(10^seq(quantile(T_spa$gamma_spe,.025),quantile(T_spa$gamma_spe,.975),length.out=4),0),
+    limits=c(quantile(T_spa$gamma_spe,.025),quantile(T_spa$gamma_spe,.975)))+
+    scale_colour_manual(values = cbPalette[6]) +
+  ggtitle('', subtitle =  "(3) Taxonomic\nγ-diversity") + 
+  xlab('Number of species') +
+  ylab('Relative effect\n on mean slope (%)') +
+  theme_agile(
+    base_family = 'sans',
+    plot_grid = TRUE,
+    base_size = 14,
+    grid_cols = 'white'
+  ) +
+  theme(
+    axis.title.x = element_text(vjust = 5, color = "black"),
+    panel.background = element_rect(
+      fill = "gray90",
+      colour = "gray90",
+      size = 0.5,
+      linetype = "solid"
+    )
+  ) +
+  theme(
+    plot.title = element_text(size = 10),
+    axis.title.y = element_blank(),
+    plot.margin = margin(0, 0, 0, 0)
+  ) +
+  theme(legend.position = 'none') +
+  annotate(
+    'text',
+    Inf,
+    Inf,
+    hjust = 1,
+    vjust = 1.3,
+    label = paste0('TAX: ', lab1, '%'),
+    colour = cbPalette[6],
+    size = 5
+  )
+
+lab1 = round(subset(M3$model$contributions, var == 'gamma_spe')[, 2], 1)
+gd_b <-
+  ggplot(data = gd_E,
+         aes(
+           x = as.numeric(predictor),
+           y = fitted_function,
+           group = group,
+           colour = group
+         )) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  #geom_rug(aes(x = rep(T_env$gamma_spe, 1)), colour ='black', sides = 'b') +
+  geom_smooth(size = 1.5, se = FALSE, method = 'loess',formula="y~x", na.rm=TRUE) +
+  geom_line(alpha = .2, size = 2, na.rm=TRUE) +
+  scale_x_continuous(
+    breaks=round(seq(quantile(T_env$gamma_spe,.025),quantile(T_env$gamma_spe,.975),length.out=4),2),
+    labels=round(10^seq(quantile(T_env$gamma_spe,.025),quantile(T_env$gamma_spe,.975),length.out=4),0),
+    limits=c(quantile(T_env$gamma_spe,.025),quantile(T_env$gamma_spe,.975)))+
+  
+    scale_colour_manual(values = cbPalette[6]) +
+  ggtitle('', subtitle = "(3) Taxonomic\nγ-diversity") +
+  xlab('Number of species') +
+  ylab('Relative effect\n on mean slope (%)') +
+  theme_agile(
+    base_family = 'sans',
+    plot_grid = TRUE,
+    base_size = 14,
+    grid_cols = 'white'
+  ) +
+  theme(
+    axis.title.x = element_text(vjust = 5, color = "black"),
+    panel.background = element_rect(
+      fill = "gray90",
+      colour = "gray90",
+      size = 0.5,
+      linetype = "solid"
+    )
+  ) +
+  theme(
+    plot.title = element_text(size = 10),
+    axis.title.y = element_blank(), plot.margin = margin(0, 0, 0, 0)
+  ) +
+  theme(legend.position = 'none') +
+  annotate(
+    'text',
+    -Inf,
+    Inf,
+    hjust = -.1,
+    vjust = 1.3,
+    label = paste0('TAX: ', lab1, '%'),
+    colour = cbPalette[6],
+    size = 5
+  )
+
+
+#Trait dimensionality plots ----
+lab2 = round(subset(M2$model$contributions, var == 'gamma_trait')[, 2], 1)
+td_a <-
+  ggplot(data = td_S,
+         aes(
+           x = as.numeric(predictor),
+           y = fitted_function,
+           group = group,
+           colour = group
+         )) +
+  geom_hline(yintercept = 0, linetype = 3) + 
+  #geom_rug(aes(x = rep(F_spa$gamma_trait, 1)), colour ='black', sides = 'b') +
+  geom_smooth(size = 1.5, se = FALSE, method = 'loess',formula="y~x", na.rm=TRUE) +
+  geom_line(alpha = .2, size = 2, na.rm=TRUE) +
+  scale_colour_manual(values = cbPalette[7]) +
+  ggtitle('', subtitle = "(4) Functional\nγ-diversity") + 
+  xlab(expression("Log hypervolume (sd"^7*")")) +
+  ylab('Relative effect\n on mean slope (%)') +
+  theme_agile(
+    base_family = 'sans',
+    plot_grid = TRUE,
+    base_size = 14,
+    grid_cols = 'white'
+  ) +
+  theme(
+    axis.title.x = element_text(vjust = 5, color = "black"),
+    panel.background = element_rect(
+      fill = "gray90",
+      colour = "gray90",
+      size = 0.5,
+      linetype = "solid"
+    )
+  ) +
+  theme(
+    plot.title = element_text(size = 10),
+    axis.title.y = element_blank(),  plot.margin = margin(0, 0, 0, 0)
+  ) +
+  scale_x_continuous(breaks=round(seq(quantile(F_spa$gamma_trait, .025),
+       quantile(F_spa$gamma_trait, .975),length.out =4),0),limits=c(quantile(F_spa$gamma_trait, .025),
+       quantile(F_spa$gamma_trait, .975)))+
+  theme(legend.position = 'none') +
+  annotate(
+    'text',
+    Inf,
+    Inf,
+    hjust = 1,
+    vjust = 1.3,
+    label = paste0('FUN: ', lab2, '%'),
+    colour = cbPalette[7],
+    size = 5
+  )
+
+
+
+lab2 = round(subset(M4$model$contributions, var == 'gamma_trait')[, 2], 1)
+td_b <-
+  ggplot(data = td_E,
+         aes(
+           x = as.numeric(predictor),
+           y = fitted_function,
+           group = group,
+           colour = group
+         )) +
+  geom_hline(yintercept = 0, linetype = 3) + 
+  #geom_rug(aes(x = rep(F_env$gamma_trait, 1)), colour ='black', sides = 'b') +
+  geom_smooth(size = 1.5, se = FALSE, method = 'loess',formula="y~x", na.rm=TRUE) +
+  geom_line(alpha = .2, size = 2, na.rm=TRUE) +
+    scale_colour_manual(values = cbPalette[7]) +
+  ggtitle('', subtitle = "(4) Functional\nγ-diversity") + 
+  xlab(expression("Log hypervolume (sd"^7*")")) +
+  ylab('Relative effect\n on mean slope (%)') +
+  theme_agile(
+    base_family = 'sans',
+    plot_grid = TRUE,
+    base_size = 14,
+    grid_cols = 'white'
+  ) +
+  theme(
+    axis.title.x = element_text(vjust = 5, color = "black"),
+    panel.background = element_rect(
+      fill = "gray90",
+      colour = "gray90",
+      size = 0.5,
+      linetype = "solid"
+    )
+  ) +
+  theme(
+    plot.title = element_text(size = 10),
+    axis.title.y = element_blank(), plot.margin = margin(0, 0, 0, 0)
+  ) +
+  scale_x_continuous(breaks=round(seq(quantile(F_env$gamma_trait, .025),
+       quantile(F_env$gamma_trait, .975),length.out =4),0),limits=c(quantile(F_env$gamma_trait, .025),
+       quantile(F_env$gamma_trait, .975)))+
+  theme(legend.position = 'none') +
+  annotate(
+    'text',
+    Inf,
+    Inf,
+    hjust = 1,
+    vjust = 1.3,
+    label = paste0('FUN: ', lab2, '%'),
+    colour = cbPalette[7],
+    size = 5
+  )
+
+
+#Number of sites plots ----
+lab1 = round(subset(M1$model$contributions, var == 'n_sites')[, 2], 1)
+lab2 = round(subset(M2$model$contributions, var == 'n_sites')[, 2], 1)
+ns_a <-
+  ggplot(data = ns_S,
+         aes(
+           x = as.numeric(predictor),
+           y = fitted_function,
+           group = group,
+           colour = group
+         )) +
+  geom_hline(yintercept = 0, linetype = 3) +
+  #geom_rug(aes(x = rep(T_spa$n_sites, 2)), colour ='black', sides = 'b') +
+  geom_smooth(size = 1.5, se = FALSE, method = 'loess',formula="y~x", na.rm=TRUE) +
+  geom_line(alpha = .2, size = 2, na.rm=TRUE) +
+  scale_colour_manual(values = cbPalette[c(7, 6)]) +
+  ggtitle('', subtitle = '(5) Sampling sites') +
+  xlab('Number of study sites') +
+  ylab('Relative effect\n on mean slope (%)') +
+  scale_x_continuous(
+    breaks=round(
+      seq(
+        quantile(T_spa$n_sites, .025),
+        quantile(T_spa$n_sites, .975),
+        length.out =4),2),
+     labels=round(
+      10^seq(
+        quantile(T_spa$n_sites, .025),
+        quantile(T_spa$n_sites, .975),
+        length.out =4),0),
+    limits=c(
+      quantile(T_spa$n_sites, .025),
+       quantile(T_spa$n_sites, .975)))+
+  theme_agile(
+    base_family = 'sans',
+    plot_grid = TRUE,
+    base_size = 14,
+    grid_cols = 'white'
+  ) +
+  theme(
+    axis.title.x = element_text(vjust = 5, color = "black"),
+    panel.background = element_rect(
+      fill = "gray90",
+      colour = "gray90",
+      size = 0.5,
+      linetype = "solid"
+    )
+  ) +
+  theme(
+    plot.title = element_text(size = 10),
+    axis.title.y = element_blank(), plot.margin = margin(0, 0, 0, 0)
+  ) +
+  theme(legend.position = 'none') +
+  annotate(
+    'text',
+    Inf,
+    Inf,
+    hjust = 1,
+    vjust = 1.3,
+    label = paste0('TAX: ', lab1, '%'),
+    colour = cbPalette[6],
+    size = 5
+  ) +
+  annotate(
+    'text',
+    Inf,
+    Inf,
+    hjust = 1,
+    vjust = 1,
+    label = paste0('\nFUN: ', lab2, '%'),
+    colour = cbPalette[7],
+    size = 5
+  )
+
+
+lab1 = round(subset(M3$model$contributions, var == 'n_var')[, 2], 1)
+lab2 = round(subset(M4$model$contributions, var == 'n_var')[, 2], 1)
+ns_b <-
+  ggplot(data = nvar_E,
+         aes(
+           x = as.numeric(predictor),
+           y = fitted_function,
+           group = group,
+           colour = group
+         )) +
+  #geom_rug(aes(x = rep(T_env$n_var, 2)), colour = 'black', sides = 'b') +
+  geom_hline(yintercept = 0, linetype = 3) +
+  geom_smooth(size = 1.5, se = FALSE, method = 'loess',formula="y~x", na.rm=TRUE) +
+  geom_line(alpha = .2, size = 2, na.rm=TRUE) +
+  scale_colour_manual(values = cbPalette[c(7, 6)]) +
+  ggtitle('', subtitle = '(5) Environmental\n variables') +
+  xlab(expression('Number of variables')) +
+  scale_x_continuous(breaks=round(
+    seq(
+      quantile(T_env$n_var, .025), 
+      quantile(T_env$n_var, .975),
+      length.out =4),2),
+    labels=round(
+    10^seq(
+      quantile(T_env$n_var, .025), 
+      quantile(T_env$n_var, .975),
+      length.out =4),0),
+    limits=c(
+      quantile(T_env$n_var, .025),
+      quantile(T_env$n_var, .975)))+
+  ylab('Relative effect\n on mean slope (%)') +
+  theme_agile(
+    base_family = 'sans',
+    plot_grid = TRUE,
+    base_size = 14,
+    grid_cols = 'white'
+  ) +
+  theme(
+    axis.title.x = element_text(vjust = 5, color = "black"),
+    panel.background = element_rect(
+      fill = "gray90",
+      colour = "gray90",
+      size = 0.5,
+      linetype = "solid"
+    )
+  ) +
+  theme(
+    plot.subtitle  = element_text(size = 10),
+    axis.title.y = element_blank(), plot.margin = margin(0, 0, 0, 0)
+  ) +
+  theme(legend.position = 'none') +
+  annotate(
+    'text',
+    Inf,
+    -Inf,
+    hjust = 1,
+    vjust = 0,
+    label = paste0('TAX: ', lab1, '%\n'),
+    colour = cbPalette[6],
+    size = 5
+  ) +
+  annotate(
+    'text',
+    Inf,
+    -Inf,
+    hjust = 1,
+    vjust = .5,
+    label = paste0('FUN: ', lab2, '%\n'),
+    colour = cbPalette[7],
+    size = 5
+  )
+
+```
+
+## Figure 7
+
+
+
+```{r, fig.width=6.5, fig.height=3.5}
+
+figure_7<- (dm_a|bs_a|gd_a|td_a|ns_a)/(dm_b|bs_b|gd_b|td_b|ns_b) + plot_annotation(title= "Effects of organismal variables and dataset features on the rate of decay", subtitle = params$subtitle) & 
+  theme(plot.title =element_text(size=15, family='sans',face='bold'),
+        plot.subtitle =element_text(size=15, family='sans'),
+        axis.title.x = element_text(size = 12),
+        axis.text.x = element_text(size=12),
+         axis.text.y = element_text(size=12)
+        )
+ggsave(plot=figure_7, filename=paste0('Figures/Figure_7_',params$based,'-',params$component,'.pdf'), height=7,
+       width=13,
+       unit="in", 
+       device=cairo_pdf())
+figure_7
+```
+
+
+```{r}
+obj <- dismo::gbm.interactions(M1$model)
+obj$rank.list
+dismo::gbm.perspec(M3$model, x=7, y=4)
+dismo::gbm.interactions(M2$model)
+dismo::gbm.interactions(M3$model)
+dismo::gbm.interactions(M4$model)
+```
+
+
+
+```{r Figure 2, eval=FALSE}
+# Map =================================================================================================================
+
+coordinates_map <- read.csv("input_between/coordinates_compiled.csv")
+WorldData <- map_data('world')
+map_sites<-ggplot() +
+  geom_polygon(data = WorldData, aes(x = long, y = lat, group = group), fill="gray50") +
+  geom_point(data = coordinates_map, aes(x = Lon, y = Lat,fill=Realms),shape=21,size=2) +
+  labs(title = 'Global distribution of the sampling sites',
+       subtitle = "151 datasets across ecosystem types") +
+  theme_grey()+
+  theme(text = element_text(family = "sans", color = "black"),
+        panel.background = element_rect(fill = "white"),
+        plot.background = element_rect(fill = "white"),
+        panel.grid = element_blank(),
+        plot.title = element_text(size = 28, hjust=0),
+        plot.subtitle = element_text(size = 20, hjust=0),
+        axis.text = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        legend.position = c(0.05,0.2),
+        legend.background = element_rect(fill="white"),
+        legend.box.background = element_rect(color="black", linetype=3,size=.5),
+        legend.key = element_rect(fill = "white"),
+        legend.text = element_text(size=12)
+  ) +
+  scale_fill_manual(values=c(cbPalette[c(7,5,4)]))+
+  guides(color = guide_legend(override.aes = list(size=5,shape=16)))
+ 
+
+# Organism =============================================================================================================
+df <- data.frame(Organism = names(table(Tax$Organism)),
+                 Counts = as.numeric(table(Tax$Organism)))
+
+df$Organism <- factor(df$Organism, levels = unique(Tax$Organism))
+n_data <- df %>% ggplot(aes(x = reorder(Organism, Counts), y = Counts)) +
+  geom_bar(stat = 'identity',
+           colour = 'black',
+           fill = "black") +
+  coord_flip() +
+  xlab('') + ylab('Number of datasets') +
+  geom_text(
+    data = df,
+    nudge_y = 3,
+    size = 4,
+    family = "sans",
+    fontface = 1,
+    aes(
+      x = reorder(Organism, Counts),
+      y = Counts,
+      label = Counts
+    )
+  ) +
+  theme_agile(
+    plot_grid = FALSE,
+    base_size = 12,
+    base_family = 'sans',
+    grid_cols = 'gray90'
+  ) +
+  theme(
+    legend.position = 'none',
+    axis.line.x = element_blank(),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank()
+  ) +
+  theme(plot.margin = margin(0, 0, 0, 0, "cm"))
+
+# Spatial extent =======================================================================================================
+
+n_ext <- ggplot(Tax, aes(spa_max)) +
+  geom_histogram(binwidth = 0.2, fill = '#000000') +
+  scale_x_continuous(
+    trans = log10_trans(),
+    breaks = trans_breaks("log10", function(x)
+      10 ^ x),
+    labels = trans_format("log10", math_format(10 ^ .x))
+  ) +
+  theme_agile(plot_grid = FALSE,
+              base_size = 12,
+              base_family = 'sans') +
+  theme(legend.position = 'none', axis.text.y = element_text(size = 12)) +
+  xlab('Spatial extent\n(kilometers)') +
+  ylab('Number of datasets')
+
+#number of sites =======================================================================================================
+
+n_su <- ggplot(Tax, aes(n_sites)) +
+  geom_histogram(binwidth = 0.1, fill = '#000000') +
+  scale_x_log10() +
+  theme_agile(plot_grid = FALSE,
+              base_size = 12,
+              base_family = 'sans') +
+  theme(legend.position = 'none', axis.text.y = element_text(size = 12)) +
+  xlab('Number of sites') +
+  ylab('')
+
+#number of species =====================================================================================================
+
+
+n_sp <- ggplot(Tax, aes(gamma_spe)) +
+  geom_histogram(binwidth = 0.1, fill = '#000000') +
+  scale_x_log10() +
+  theme_agile(plot_grid = FALSE,
+              base_size = 12,
+              base_family = 'sans') +
+  theme(legend.position = 'none', axis.text.y = element_text(size = 12)) +
+  xlab('Number of species') +
+  ylab('')
+
+#Latitudinal distribution ==============================================================================================
+
+n_lat <- ggplot(Tax, aes(Latitude)) +
+  geom_histogram(binwidth = 4, fill = '#000000') +
+  # scale_x_log10  scale_x_continuous(breaks = seq(0, 90, 15)) +
+  theme_agile(plot_grid = FALSE,
+              base_size = 12,
+              base_family = 'sans') +
+  theme(legend.position = 'none', axis.text.y = element_text(size = 12)) +
+  xlab('Mean absolute latitude\n(degrees)') +
+  ylab('')
+
+```
+
+```{r Figure 2, fig.height=10, fig.width=10, eval=FALSE}
+fig_2_a <-   map_sites
+design<-c(area(t=1,l=1,b=2,r=1),
+          area(t=1,l=2.5,b=2,r=4))
+fig_2_b <- patchworkGrob(({n_data} |{(n_ext | n_su) / (n_lat | n_sp) }) + plot_layout(design=design))
+design<-c(area(t=1,l=1,b=2,r=2),
+          area(t=3,l=1,b=5,r=2))
+Figure_2<- fig_2_a + fig_2_b + plot_layout(design=design) 
+Figure_2
+ggsave(Figure_2, file='~/OneDrive - University of Helsinki/Documentos/Post-Doc/AoF/Figure_2.pdf', device=cairo_pdf, width=10, height=10, unit="in")
+```
+
+
